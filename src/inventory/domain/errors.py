@@ -32,3 +32,25 @@ class InvalidStateTransition(InventoryError):
         self.reservation_id = reservation_id
         self.current = current
         self.attempted = attempted
+
+
+class ProductNotFound(InventoryError):
+    code = "product_not_found"
+
+
+class DuplicateProduct(InventoryError):
+    code = "duplicate_product"
+
+
+class ReservationNotFound(InventoryError):
+    code = "reservation_not_found"
+
+
+class InsufficientStock(InventoryError):
+    code = "insufficient_stock"
+
+    def __init__(self, product_id: str, requested: int, available: int) -> None:
+        super().__init__(f"Product {product_id} has {available} available, {requested} requested")
+        self.product_id = product_id
+        self.requested = requested
+        self.available = available
