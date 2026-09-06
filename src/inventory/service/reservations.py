@@ -43,11 +43,12 @@ class ReservationService:
 
     def get_stock_level(self, product_id: str) -> StockLevel:
         """The current split of a product's stock. Raises `ProductNotFound`."""
-        return self._current_level(product_id)
+        with self._repository.lock_product(product_id):
+            return self._current_level(product_id)
 
     def get_reservation(self, reservation_id: str) -> Reservation:
         """Raises `ReservationNotFound`."""
-        return self._settle(self._repository.get_reservation(reservation_id))
+        return self._apply(reservation_id, _no_change)
 
     def confirm(self, reservation_id: str) -> Reservation:
         """Turn an active hold into a completed sale.
@@ -73,19 +74,20 @@ class ReservationService:
         if quantity < 1:
             raise InvalidQuantity(f"Quantity must be at least 1, got {quantity}")
 
-        available = self._current_level(product_id).available
-        if quantity > available:
-            raise InsufficientStock(product_id, requested=quantity, available=available)
+        with self._repository.lock_product(product_id):
+            available = self._current_level(product_id).available
+            if quantity > available:
+                raise InsufficientStock(product_id, requested=quantity, available=available)
 
-        reservation = Reservation.create(
-            id=uuid4().hex,
-            product_id=product_id,
-            quantity=quantity,
-            now=self._clock.now(),
-            hold=self._hold,
-        )
-        self._repository.add_reservation(reservation)
-        return reservation
+            reservation = Reservation.create(
+                id=uuid4().hex,
+                product_id=product_id,
+                quantity=quantity,
+                now=self._clock.now(),
+                hold=self._hold,
+            )
+            self._repository.add_reservation(reservation)
+            return reservation
 
     def _apply(
         self, reservation_id: str, transition: Callable[[Reservation], Reservation]
@@ -95,14 +97,24 @@ class ReservationService:
         Settling first is what makes "you cannot pay for something whose hold ran
         out" fall out for free: the reservation is already EXPIRED by the time the
         transition is attempted, and the domain refuses it.
+
+        The read outside the lock only discovers which product to lock -- a
+        reservation never moves between products. Everything that decides or
+        writes happens again inside the lock.
         """
-        reservation = self._settle(self._repository.get_reservation(reservation_id))
-        updated = transition(reservation)
-        self._repository.replace_reservation(updated)
-        return updated
+        product_id = self._repository.get_reservation(reservation_id).product_id
+        with self._repository.lock_product(product_id):
+            reservation = self._settle(self._repository.get_reservation(reservation_id))
+            updated = transition(reservation)
+            if updated is reservation:
+                return reservation
+            self._repository.replace_reservation(updated)
+            return updated
 
     def _current_level(self, product_id: str) -> StockLevel:
         """Reclaim lapsed holds, then derive the stock split.
+
+        Callers must already hold this product's lock.
 
         Sweeping before counting is the only mechanism that decides expiry. The
         counting step does not filter on deadlines as well -- one rule, one place.
@@ -135,3 +147,13 @@ class ReservationService:
     @staticmethod
     def _quantity_in(reservations: list[Reservation], state: ReservationState) -> int:
         return sum(r.quantity for r in reservations if r.state is state)
+
+
+def _no_change(reservation: Reservation) -> Reservation:
+    """A read is a transition that transitions nothing.
+
+    Routing `get_reservation` through `_apply` means a read settles a lapsed
+    hold under the same lock as a write, instead of having a second code path
+    that does almost the same thing.
+    """
+    return reservation

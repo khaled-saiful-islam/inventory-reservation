@@ -6,6 +6,8 @@ layer. It holds two dictionaries and an index; it contains no business rules.
 
 from __future__ import annotations
 
+import threading
+
 from inventory.domain.errors import (
     DuplicateProduct,
     ProductNotFound,
@@ -17,8 +19,7 @@ from inventory.domain.models import Product, Reservation
 class InMemoryInventoryRepository:
     """Process-local storage for products and reservations.
 
-    Note what is *not* here: no lock, and no stock arithmetic. Locking arrives in
-    Step 4 once there is a failing concurrency test to justify its shape, and
+    It hands out one mutex per product but contains no stock arithmetic --
     availability is the service's business rule, not storage's.
     """
 
@@ -28,12 +29,27 @@ class InMemoryInventoryRepository:
         # product_id -> reservation ids, so reading one product's holds never
         # scans every reservation in the system.
         self._reservation_ids_by_product: dict[str, list[str]] = {}
+        # One mutex per product. Reserving a sneaker must not block a jacket.
+        self._locks: dict[str, threading.Lock] = {}
+        # Guards the registry above while a product is being added or looked up.
+        # Held for a dictionary access only, never across business logic.
+        self._registry = threading.Lock()
+
+    def lock_product(self, product_id: str) -> threading.Lock:
+        """The mutex protecting one product. Raises `ProductNotFound`."""
+        with self._registry:
+            try:
+                return self._locks[product_id]
+            except KeyError:
+                raise ProductNotFound(f"Product {product_id} does not exist") from None
 
     def add_product(self, product: Product) -> None:
-        if product.id in self._products:
-            raise DuplicateProduct(f"Product {product.id} already exists")
-        self._products[product.id] = product
-        self._reservation_ids_by_product[product.id] = []
+        with self._registry:
+            if product.id in self._products:
+                raise DuplicateProduct(f"Product {product.id} already exists")
+            self._products[product.id] = product
+            self._reservation_ids_by_product[product.id] = []
+            self._locks[product.id] = threading.Lock()
 
     def get_product(self, product_id: str) -> Product:
         try:

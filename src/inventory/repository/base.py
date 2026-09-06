@@ -10,12 +10,25 @@ implementation does not need to inherit anything, it just needs the methods.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import Protocol
 
 from inventory.domain.models import Product, Reservation
 
 
 class InventoryRepository(Protocol):
+    def lock_product(self, product_id: str) -> AbstractContextManager[object]:
+        """Exclusive access to one product's stock for the duration of the block.
+
+        Deliberately typed as a context manager rather than a `threading.Lock`.
+        The in-memory store returns a mutex; a SQL-backed store would return a
+        transaction holding `SELECT ... FOR UPDATE`, and the service would not
+        change a line.
+
+        Raises `ProductNotFound` if there is no such product.
+        """
+        ...
+
     def add_product(self, product: Product) -> None:
         """Store a new product. Raises `DuplicateProduct` if the id is taken."""
         ...
