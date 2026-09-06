@@ -51,6 +51,11 @@ class InMemoryInventoryRepository:
         except KeyError:
             raise ReservationNotFound(f"Reservation {reservation_id} does not exist") from None
 
+    def replace_reservation(self, reservation: Reservation) -> None:
+        if reservation.id not in self._reservations:
+            raise ReservationNotFound(f"Reservation {reservation.id} does not exist")
+        self._reservations[reservation.id] = reservation
+
     def reservations_for_product(self, product_id: str) -> list[Reservation]:
         ids = self._reservation_ids_by_product.get(product_id, [])
         return [self._reservations[reservation_id] for reservation_id in ids]

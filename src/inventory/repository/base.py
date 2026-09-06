@@ -32,6 +32,14 @@ class InventoryRepository(Protocol):
         """Fetch a reservation. Raises `ReservationNotFound` if there is no such id."""
         ...
 
+    def replace_reservation(self, reservation: Reservation) -> None:
+        """Overwrite the stored reservation that shares this id.
+
+        Reservations are immutable, so a state change produces a new object that
+        takes the old one's place.
+        """
+        ...
+
     def reservations_for_product(self, product_id: str) -> list[Reservation]:
         """Every reservation ever made against this product, in creation order."""
         ...

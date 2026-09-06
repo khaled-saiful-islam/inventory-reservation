@@ -6,6 +6,7 @@ the storage port; it knows nothing about HTTP.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from uuid import uuid4
 
@@ -42,11 +43,27 @@ class ReservationService:
 
     def get_stock_level(self, product_id: str) -> StockLevel:
         """The current split of a product's stock. Raises `ProductNotFound`."""
-        return self._stock_level(self._repository.get_product(product_id))
+        return self._current_level(product_id)
 
     def get_reservation(self, reservation_id: str) -> Reservation:
         """Raises `ReservationNotFound`."""
-        return self._repository.get_reservation(reservation_id)
+        return self._settle(self._repository.get_reservation(reservation_id))
+
+    def confirm(self, reservation_id: str) -> Reservation:
+        """Turn an active hold into a completed sale.
+
+        Raises `ReservationNotFound`, or `InvalidStateTransition` if the hold has
+        already been confirmed, cancelled, or has run out of time.
+        """
+        return self._apply(reservation_id, Reservation.confirm)
+
+    def cancel(self, reservation_id: str) -> Reservation:
+        """Give up an active hold and return its stock to the pool.
+
+        Raises `ReservationNotFound`, or `InvalidStateTransition` if the hold is
+        already in a final state.
+        """
+        return self._apply(reservation_id, Reservation.cancel)
 
     def reserve(self, *, product_id: str, quantity: int) -> Reservation:
         """Hold `quantity` units of a product for the configured window.
@@ -56,8 +73,7 @@ class ReservationService:
         if quantity < 1:
             raise InvalidQuantity(f"Quantity must be at least 1, got {quantity}")
 
-        product = self._repository.get_product(product_id)
-        available = self._stock_level(product).available
+        available = self._current_level(product_id).available
         if quantity > available:
             raise InsufficientStock(product_id, requested=quantity, available=available)
 
@@ -71,19 +87,50 @@ class ReservationService:
         self._repository.add_reservation(reservation)
         return reservation
 
-    def _stock_level(self, product: Product) -> StockLevel:
-        """Derive the stock split from the reservations themselves.
+    def _apply(
+        self, reservation_id: str, transition: Callable[[Reservation], Reservation]
+    ) -> Reservation:
+        """Settle any lapsed hold, then run a state transition and store the result.
 
-        Counting on demand rather than maintaining running totals means there is
-        no second number that can drift out of step with reality -- and a drifted
-        counter is precisely how a system oversells.
+        Settling first is what makes "you cannot pay for something whose hold ran
+        out" fall out for free: the reservation is already EXPIRED by the time the
+        transition is attempted, and the domain refuses it.
         """
-        reservations = self._repository.reservations_for_product(product.id)
+        reservation = self._settle(self._repository.get_reservation(reservation_id))
+        updated = transition(reservation)
+        self._repository.replace_reservation(updated)
+        return updated
+
+    def _current_level(self, product_id: str) -> StockLevel:
+        """Reclaim lapsed holds, then derive the stock split.
+
+        Sweeping before counting is the only mechanism that decides expiry. The
+        counting step does not filter on deadlines as well -- one rule, one place.
+        """
+        product = self._repository.get_product(product_id)
+        self._sweep_lapsed(product_id)
+
+        reservations = self._repository.reservations_for_product(product_id)
         return StockLevel(
             total=product.total_stock,
             confirmed=self._quantity_in(reservations, ReservationState.CONFIRMED),
             reserved=self._quantity_in(reservations, ReservationState.ACTIVE),
         )
+
+    def _sweep_lapsed(self, product_id: str) -> None:
+        """Mark every hold on this product whose window has closed as EXPIRED."""
+        now = self._clock.now()
+        for reservation in self._repository.reservations_for_product(product_id):
+            if reservation.is_expired_at(now):
+                self._repository.replace_reservation(reservation.expire())
+
+    def _settle(self, reservation: Reservation) -> Reservation:
+        """Record a single lapsed hold as expired. A no-op for anything else."""
+        if not reservation.is_expired_at(self._clock.now()):
+            return reservation
+        expired = reservation.expire()
+        self._repository.replace_reservation(expired)
+        return expired
 
     @staticmethod
     def _quantity_in(reservations: list[Reservation], state: ReservationState) -> int:
