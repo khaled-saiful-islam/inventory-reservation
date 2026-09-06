@@ -41,6 +41,10 @@ class ReservationService:
         self._repository.add_product(product)
         return product
 
+    def get_product(self, product_id: str) -> Product:
+        """Raises `ProductNotFound`."""
+        return self._repository.get_product(product_id)
+
     def get_stock_level(self, product_id: str) -> StockLevel:
         """The current split of a product's stock. Raises `ProductNotFound`."""
         with self._repository.lock_product(product_id):

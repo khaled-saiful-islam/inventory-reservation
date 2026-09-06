@@ -26,6 +26,12 @@ packages = ["src/inventory"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
+# Both come from starlette's TestClient, not from this codebase. Listed
+# explicitly rather than blanket-ignored, so a new warning still shows up.
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+]
 
 [tool.coverage.run]
 source = ["src/inventory"]
