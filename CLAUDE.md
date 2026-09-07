@@ -52,4 +52,7 @@ make run        # start the API on :8000
 make test       # run the suite
 make check      # lint + test
 make load-test  # 500 concurrent requests against a 1-item product
+make demo       # 14-step API walkthrough via curl
+make check      # lint + tests
 ```
+
