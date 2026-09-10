@@ -47,9 +47,29 @@ uv run uvicorn inventory.api.main:app --workers 1
 ```
 
 ```bash
-docker build -t inventory-reservation .
-docker run --rm -p 8000:8000 inventory-reservation
+docker compose up --build       # http://localhost:8200
+docker compose down
 ```
+
+Or with the make targets, which also wait for the healthcheck:
+
+```bash
+make docker-up        # build, start, wait until healthy
+make docker-verify    # run the demo and load test against the container
+make docker-down      # stop and remove the container and its network
+```
+
+The compose file is deliberately self-contained, so it cannot disturb anything
+else already running on the machine:
+
+- **Its own compose project** (`name: inventory-reservation`) and its own
+  bridge network (`inventory-reservation-net`) -- nothing is shared.
+- **Port 8200, not 8000.** 8000 is a common default and this stack should never
+  fight another project for it. Override with `INVENTORY_PORT=9500 make docker-up`.
+- **Bound to `127.0.0.1`**, so it is not reachable from the local network.
+- **No volumes and no bind mounts.** Inventory lives in process memory by
+  design, so `docker compose down` leaves nothing behind.
+- **One worker**, for the reason in [Limitations](#limitations).
 </details>
 
 ---

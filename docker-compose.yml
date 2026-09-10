@@ -1,0 +1,36 @@
+# Fully self-contained: one service, one private network, no volumes, no
+# dependency on anything already running on this machine.
+#
+#   docker compose up --build      -> http://localhost:8200
+#   docker compose down
+#
+# Port 8200 is used instead of 8000 because 8000 is a common default and this
+# stack should never fight another project for it. Override without editing
+# this file:  INVENTORY_PORT=9500 docker compose up
+
+name: inventory-reservation
+
+services:
+  api:
+    build: .
+    image: inventory-reservation:local
+    container_name: inventory-reservation-api
+    ports:
+      # Bound to 127.0.0.1 only -- not exposed to the local network.
+      - "127.0.0.1:${INVENTORY_PORT:-8200}:8000"
+    networks:
+      - inventory
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    # Nothing is persisted -- inventory lives in process memory by design, so
+    # there is no volume and a restart is a clean slate.
+
+networks:
+  inventory:
+    name: inventory-reservation-net
+    driver: bridge
