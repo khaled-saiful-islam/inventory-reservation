@@ -68,6 +68,11 @@ def register_error_handlers(app: FastAPI) -> None:
 
 
 def _first_problem(exc: RequestValidationError) -> str:
+    """The first validation failure as one readable line, e.g. `quantity: ...`.
+
+    Only the first: a caller fixing one field at a time does not need the list,
+    and the full detail is still in the OpenAPI schema.
+    """
     errors = exc.errors()
     if not errors:
         return "Request body is invalid"

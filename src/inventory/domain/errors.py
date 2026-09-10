@@ -15,14 +15,20 @@ class InventoryError(Exception):
 
 
 class InvalidQuantity(InventoryError):
+    """A reservation asked for fewer than one unit."""
+
     code = "invalid_quantity"
 
 
 class InvalidStock(InventoryError):
+    """A product was created with negative stock."""
+
     code = "invalid_stock"
 
 
 class InvalidStateTransition(InventoryError):
+    """Something tried to change a reservation that is already final."""
+
     code = "invalid_state_transition"
 
     def __init__(self, reservation_id: str, current: str, attempted: str) -> None:
@@ -44,6 +50,11 @@ class DuplicateProduct(InventoryError):
 
 class ReservationNotFound(InventoryError):
     code = "reservation_not_found"
+
+
+# The two errors below carry their numbers as attributes, not only inside the
+# message, so the API can return them as structured fields and a test can
+# assert on them without parsing a string.
 
 
 class InsufficientStock(InventoryError):

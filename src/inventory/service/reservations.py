@@ -37,6 +37,7 @@ class ReservationService:
         self._hold = hold
 
     def create_product(self, *, product_id: str, name: str, total_stock: int) -> Product:
+        """Register a product and its stock. Raises `DuplicateProduct`, `InvalidStock`."""
         product = Product(id=product_id, name=name, total_stock=total_stock)
         self._repository.add_product(product)
         return product
@@ -75,9 +76,14 @@ class ReservationService:
 
         Raises `InvalidQuantity`, `ProductNotFound`, or `InsufficientStock`.
         """
+        # Checked here as well as in `Reservation.__post_init__` on purpose, so
+        # this method states its own preconditions and rejects nonsense before
+        # taking a lock. Pydantic checks it a third time at the HTTP boundary.
         if quantity < 1:
             raise InvalidQuantity(f"Quantity must be at least 1, got {quantity}")
 
+        # Everything from the read to the write happens inside this lock. That
+        # is the whole no-overselling guarantee -- see ADR-001.
         with self._repository.lock_product(product_id):
             available = self._current_level(product_id).available
             if quantity > available:
@@ -110,6 +116,9 @@ class ReservationService:
         with self._repository.lock_product(product_id):
             reservation = self._settle(self._repository.get_reservation(reservation_id))
             updated = transition(reservation)
+            # Identity, not equality: only `_no_change` hands back the same
+            # object, and a plain read must not write. Every real transition
+            # returns a new `Reservation`, so this never skips a genuine change.
             if updated is reservation:
                 return reservation
             self._repository.replace_reservation(updated)

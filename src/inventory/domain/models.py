@@ -89,6 +89,10 @@ class Reservation:
         Nothing expires a reservation on a timer. It becomes expired the moment
         anyone looks at it after the deadline -- see the service layer, which
         sweeps these before it reads available stock.
+
+        `>=` not `>`: the deadline itself counts as expired. `TestExpiryWindow`
+        pins the boundary at 119s, 120s and 121s so a refactor cannot quietly
+        hand the customer an extra second.
         """
         return self.state is ReservationState.ACTIVE and now >= self.expires_at
 

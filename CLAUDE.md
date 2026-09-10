@@ -1,10 +1,10 @@
 # Inventory Reservation System — repository map
 
-A backend service that holds limited stock for a short window so that a flash
-sale never oversells, even when hundreds of requests arrive at the same instant.
+Holds limited stock for two minutes so a flash sale cannot oversell, even when
+hundreds of requests arrive at the same instant.
 
-Read this file first. It describes how the repository is laid out and which rules
-are non-negotiable. Detailed reasoning lives in `docs/`.
+Read this first. It is the layout and the rules that must hold. Reasoning lives
+in `docs/adr/`, build history in `docs/steps/`.
 
 ## The one invariant
 
@@ -12,8 +12,8 @@ are non-negotiable. Detailed reasoning lives in `docs/`.
 available = total_stock - confirmed - active_reservations
 ```
 
-Every operation preserves it. `available` must never go negative. If a change
-cannot be shown to preserve this, it is wrong.
+Every operation preserves it, and `available` must never go negative. A change
+that cannot be shown to preserve it is wrong.
 
 ## Layout
 
@@ -30,29 +30,38 @@ Dependencies point downward only. The domain layer never imports FastAPI.
 
 1. **No `sleep()` in tests.** Time is injected through the `Clock` protocol; tests
    use `FakeClock` and advance it explicitly.
-2. **Single process only.** Locks are in-process. Never run uvicorn with more than
-   one worker.
-3. **Availability is computed in one place.** Do not recalculate it inline anywhere else.
-4. **Domain objects are immutable.** State changes return a new object rather than
-   mutating in place.
-5. **Routes do not contain `try/except`.** Domain errors are mapped to HTTP status
-   codes centrally in `api/errors.py`.
-
-## Docs
-
-- `docs/steps/` — what changed at each step of the build, in order.
-- `docs/adr/` — the design decisions, with the alternatives that were rejected.
-- `AI_DISCLOSURE.md` — how AI tooling was used on this project.
+2. **Availability is computed in one place** (`StockLevel`). Never recalculate it
+   inline.
+3. **Domain objects are immutable.** A state change returns a new object.
+4. **Locks span decide-and-write.** Never read availability outside the product
+   lock and write inside it.
+5. **Routes contain no `try/except`.** Domain errors map to status codes in
+   `api/errors.py` — add a row to `STATUS_BY_ERROR`, not a handler in a route.
+6. **API handlers stay `def`, never `async def`.** Sync handlers run in FastAPI's
+   threadpool, which is what creates real contention. An `async def` with no
+   `await` would serialise requests and make the load test meaningless.
+7. **Single process only.** Locks are in-process; never more than one uvicorn
+   worker. See ADR-001 for what horizontal scaling would require.
+8. **Don't relax the concurrency tests' switch interval.** `preempt_aggressively`
+   in `tests/test_concurrency.py` is what makes them fail when locking is wrong.
 
 ## Commands
 
 ```bash
-make install    # install dependencies
-make run        # start the API on :8000
-make test       # run the suite
-make check      # lint + test
-make load-test  # 500 concurrent requests against a 1-item product
-make demo       # 14-step API walkthrough via curl
-make check      # lint + tests
+make install       # install dependencies
+make test          # run the suite
+make check         # lint + tests
+make run           # API on :8000, docs at /docs
+make demo          # 14-step API walkthrough, statuses asserted
+make load-test     # 500 concurrent HTTP requests
+
+make docker-up     # container on :8200, isolated network, no volumes
+make docker-verify # demo + load test against the container
+make docker-down
 ```
 
+## Docs
+
+- `docs/adr/` — design decisions, with the rejected alternatives.
+- `docs/steps/` — one file per build step, including what was backed out.
+- `AI_DISCLOSURE.md` — how AI tooling was used.
